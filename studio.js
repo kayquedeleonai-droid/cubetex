@@ -10,6 +10,9 @@ function dimensions(longSide){
   return {width:Math.round(longSide*x/Math.max(x,y)),height:Math.round(longSide*y/Math.max(x,y))};
 }
 let tiled=false;
+let pitch=.2,zoom=1,panX=0,panY=0,cameraFrame=0;
+function redrawCamera(){cancelAnimationFrame(cameraFrame);cameraFrame=requestAnimationFrame(renderView);}
+function setZoom(value){zoom=Math.min(8,Math.max(.35,value));redrawCamera();}
 const storageKey="cubetex.studio.project.v1";
 function validate(p){
   if(!p || p.version!==1 || !p.graph || !Array.isArray(p.graph.nodes)||!Array.isArray(p.graph.links)||p.graph.nodes.length>256||p.graph.links.length>1024)throw Error("Formato de projeto inválido");
@@ -74,11 +77,20 @@ function renderView(){
       for(let y=0;y<3;y++)for(let x=0;x<3;x++)ctx.drawImage(tile,x*tile.width,y*tile.height);
     }else CubeEngine.render(canvas,graph,{map,...light});
   }else{
-    canvas.width=canvas.height=400;
-    CubeEngine.sphere(canvas,graph,{rotation,...light});
+    const stage=el("stage"),ratio=Math.min(1.5,window.devicePixelRatio||1);
+    const width=Math.max(128,Math.min(1200,Math.round(stage.clientWidth*ratio)));
+    const height=Math.max(128,Math.min(900,Math.round(stage.clientHeight*ratio)));
+    if(canvas.width!==width)canvas.width=width;
+    if(canvas.height!==height)canvas.height=height;
+    CubeEngine.sphere(canvas,graph,{rotation,pitch,zoom,panX,panY,model:el("model").value||"sphere",...light});
   }
+  el("cameraControls").hidden=flat;
+  el("zoomValue").value=Math.round(zoom*100)+"%";
+  el("zoomOut").disabled=zoom<=.35;el("zoomIn").disabled=zoom>=8;
+  el("stamp").hidden=!flat;
+  canvas.setAttribute("aria-label",flat?"Prévia da textura":"Material em 3D");
   el("stamp").textContent=flat?maps[map].toUpperCase():"PERSPECTIVA";
-  el("stagehint").textContent=flat?(tiled?"Repetição 3 × 3":"Textura 2D"):"Arraste para girar";
+  el("stagehint").textContent=flat?(tiled?"Repetição 3 × 3":"Textura 2D"):"Arraste para girar · Shift + arraste para mover";
   el("tileView").classList.toggle("active",flat&&tiled);el("view2").classList.toggle("active",flat&&!tiled);el("view3").classList.toggle("active",!flat);
 }
 function renderAll(){
@@ -115,10 +127,33 @@ el("paramsTab").onclick=()=>switchTab(false);el("lightTab").onclick=()=>switchTa
 el("aspect").onchange=()=>{flat=true;renderView();persist();};
 el("tileView").onclick=()=>{tiled=true;showMap(map);};
 el("view2").onclick=()=>{tiled=false;showMap(map);};el("view3").onclick=()=>{flat=false;renderView();};
+function centerCamera(){
+  const model=el("model").value;
+  rotation=model==="cube"?.62:model==="plane"?.18:0;
+  pitch=model==="cube"?-.38:model==="plane"?-.18:.24;
+  zoom=1;panX=panY=0;redrawCamera();
+}
+el("model").onchange=centerCamera;el("resetCamera").onclick=centerCamera;
+el("zoomIn").onclick=()=>setZoom(zoom*1.4);el("zoomOut").onclick=()=>setZoom(zoom/1.4);
+const stage=el("stage");
+stage.addEventListener("wheel",e=>{
+  if(flat||el("cameraControls").contains(e.target))return;
+  e.preventDefault();setZoom(zoom*Math.exp(-Math.sign(e.deltaY)*.16));
+},{passive:false});
+new ResizeObserver(()=>{if(graph&&!flat)redrawCamera();}).observe(stage);
 let drag=null;
-el("stage").onpointerdown=e=>{if(!flat){drag=e.clientX;e.currentTarget.setPointerCapture(e.pointerId);}};
-el("stage").onpointermove=e=>{if(drag===null)return;rotation+=(e.clientX-drag)*.012;drag=e.clientX;clearTimeout(renderTimer);renderTimer=setTimeout(renderView,16);};
-el("stage").onlostpointercapture=()=>drag=null;
+stage.onpointerdown=e=>{
+  if(flat||el("cameraControls").contains(e.target)||(e.button!==0&&e.button!==1))return;
+  drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};stage.setPointerCapture(e.pointerId);
+};
+stage.onpointermove=e=>{
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;
+  if(drag.pan){panX+=dx/stage.clientWidth;panY+=dy/stage.clientHeight;}
+  else{rotation+=dx*.012;pitch=Math.min(1.55,Math.max(-1.55,pitch+dy*.012));}
+  redrawCamera();
+};
+stage.onlostpointercapture=()=>drag=null;
 function download(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000);}
 const filename=()=> (el("projectName").value.trim()||"Material").replace(/[<>:"/\\|?*]/g,"_");
 el("save").onclick=()=>{persist();download(new Blob([JSON.stringify(state(),null,2)],{type:"application/json"}),filename()+".cubetex");};

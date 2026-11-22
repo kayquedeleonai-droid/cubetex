@@ -311,21 +311,68 @@
     if(!options.nodeId)joinBorders(out,w,h);
     ctx.putImageData(im,0,0);
   }
+  let previewCache;
   function sphere(canvas,graph,options={}) {
-    const w=canvas.width,h=canvas.height,sz=Math.min(640,Math.max(256,w));
-    const id=target(graph,options),{data,height,rough,metal,p}=joinedMaterial(graph,id,sz);
+    const w=canvas.width,h=canvas.height,zoom=options.zoom||1;
+    const sz=zoom>3?1536:zoom>1.4?1024:512;
+    const key=JSON.stringify([sz,graph.nodes.map(n=>[n.id,n.type,n.params]),graph.links]);
+    if(previewCache?.key!==key)previewCache={key,material:joinedMaterial(graph,target(graph,options),sz)};
+    const {data,height,rough,metal,p}=previewCache.material;
     const ctx=canvas.getContext("2d"),im=ctx.createImageData(w,h),pix=im.data,light=lighting(options);
-    const R=Math.min(w,h)*.467,rot=options.rotation||0;
+    const shape=options.model||"sphere",R=Math.min(w,h)*.44*zoom;
+    const yaw=options.rotation||0,pitch=options.pitch||0;
+    const c=Math.cos(yaw),s=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    // Object-space direction toward the camera after inverse orbit rotation.
+    const vx=-s*cp,vy=sp,vz=c*cp;
+    const cx=w*(.5+(options.panX||0)),cy=h*(.5+(options.panY||0));
     for(let y=0,i=0;y<h;y++)for(let x=0;x<w;x++,i+=4){
-      const nx=(x+.5-w/2)/R,ny=(h/2-y-.5)/R,d2=nx*nx+ny*ny;if(d2>=1)continue;
-      const nz=Math.sqrt(1-d2);
-      const u=fract(2*(Math.atan2(nx,nz)/(2*Math.PI)+.5+rot/(2*Math.PI)));
-      const v=fract(2*Math.acos(ny)/Math.PI);
-      const tx=Math.floor(u*sz),ty=Math.min(sz-1,Math.floor(v*sz)),k=(ty*sz+tx)*4;
+      const wx=(x+.5-cx)/R,wy=(cy-y-.5)/R;
+      const ox=c*wx+s*sp*wy,oy=cp*wy,oz=s*wx-c*sp*wy;
+      let nx=0,ny=0,nz=0,u=0,v=0,t=-Infinity,coverage=1;
+      if(shape==="sphere"){
+        const radius2=wx*wx+wy*wy;if(radius2>=1)continue;
+        t=Math.sqrt(1-radius2);nx=ox+t*vx;ny=oy+t*vy;nz=oz+t*vz;
+        u=2*(Math.atan2(nx,nz)/(2*Math.PI)+.5);
+        v=2*Math.acos(Math.max(-1,Math.min(1,ny)))/Math.PI;
+        coverage=clamp((1-Math.sqrt(radius2))*R);
+      }else if(shape==="cylinder"){
+        const radius=.7,half=.83,A=vx*vx+vz*vz,B=ox*vx+oz*vz;
+        const disc=B*B-A*(ox*ox+oz*oz-radius*radius);
+        if(A>1e-8&&disc>=0){
+          const side=(-B+Math.sqrt(disc))/A,hity=oy+side*vy;
+          if(Math.abs(hity)<=half){t=side;nx=(ox+t*vx)/radius;nz=(oz+t*vz)/radius;
+            u=2*(Math.atan2(nx,nz)/(2*Math.PI)+.5);v=.5-hity/(2*half);}
+        }
+        if(Math.abs(vy)>1e-8){
+          const cap=(Math.sign(vy)*half-oy)/vy,px=ox+cap*vx,pz=oz+cap*vz;
+          if(cap>t&&px*px+pz*pz<=radius*radius){t=cap;nx=nz=0;ny=Math.sign(vy);u=.5+px/(2*radius);v=.5+pz*ny/(2*radius);}
+        }
+        if(!Number.isFinite(t))continue;
+      }else{
+        const plane=shape==="plane",extent=plane?1:.64;
+        // Test camera-facing faces, retaining the foremost bounded intersection.
+        for(let axis=plane?2:0;axis<3;axis++){
+          const direction=axis===0?vx:axis===1?vy:vz;
+          if(Math.abs(direction)<1e-8)continue;
+          const sign=Math.sign(direction),offset=axis===0?ox:axis===1?oy:oz;
+          const hit=((plane?0:extent*sign)-offset)/direction;
+          const px=ox+hit*vx,py=oy+hit*vy,pz=oz+hit*vz;
+          if(hit<=t||Math.max(Math.abs(px),Math.abs(py),Math.abs(pz))>extent+1e-7)continue;
+          t=hit;nx=axis===0?sign:0;ny=axis===1?sign:0;nz=axis===2?sign:0;
+          u=.5+(axis===0?-sign*pz:axis===2?sign*px:px)/(2*extent);
+          v=.5+(axis===1?sign*pz:-py)/(2*extent);
+        }
+        if(!Number.isFinite(t))continue;
+      }
+      const tx=Math.floor(fract(u)*sz),ty=Math.floor(fract(v)*sz),k=(ty*sz+tx)*4;
       const dx=(height[(ty*sz+(tx+1)%sz)*4+3]-height[(ty*sz+(tx+sz-1)%sz)*4+3])/255*p.relief*.84;
       const dy=(height[(((ty+1)%sz)*sz+tx)*4+3]-height[(((ty+sz-1)%sz)*sz+tx)*4+3])/255*p.relief*.84;
-      const horizontal=Math.max(.001,Math.hypot(nx,nz)),sx=nx/horizontal,cz=nz/horizontal;
-      let ax=nx-dx*cz-dy*sx*ny,ay=ny+dy*horizontal,az=nz+dx*sx-dy*cz*ny;
+      // Tangent follows increasing U. The second tangent points toward decreasing V.
+      const horizontal=Math.hypot(nx,nz);
+      const ux=horizontal>1e-6?nz/horizontal:1,uz=horizontal>1e-6?-nx/horizontal:0;
+      const lx=nx-dx*ux+dy*ny*uz,ly=ny+dy*(nz*ux-nx*uz),lz=nz-dx*uz-dy*ny*ux;
+      const rotatedZ=-s*lx+c*lz;
+      let ax=c*lx+s*lz,ay=cp*ly-sp*rotatedZ,az=sp*ly+cp*rotatedZ;
       const inv=1/Math.hypot(ax,ay,az);ax*=inv;ay*=inv;az*=inv;
       const roughness=rough?rough[k+3]/255:clamp(p.roughness+(height[k+3]/255-.5)*.7);
       const metallic=metal?metal[k+3]/255:clamp(p.metallic-(height[k+3]/255-.45)*.95);
@@ -338,7 +385,7 @@
         const base=data[k+c],tint=lerp(245,base,metallic*.45);
         pix[i+c]=base*diffuse+tint*spec*.65+rim*(c===2?58:42);
       }
-      pix[i+3]=255*clamp((1-Math.sqrt(d2))*R);
+      pix[i+3]=255*coverage;
     }
     ctx.putImageData(im,0,0);
   }

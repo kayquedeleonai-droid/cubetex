@@ -201,7 +201,7 @@
       for(const [key,s] of Object.entries(engine().types)) {
         if(key==="output"&&project.nodes.some(n=>n.type==="output"))continue;
         if(!s.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())) continue;
-        const b=el("button","cg-item");b.type="button";b.append(icon(paths[key]?key:"source"),el("span","",s.name));b.onclick=()=>add(key,at);list.append(b);
+        const b=el("button","cg-item");b.type="button";b.append(window.CubeNodeSwatch(key),el("span","",s.name));b.onclick=()=>add(key,at);list.append(b);
       }
     }
     search.oninput=fill;search.onkeydown=e=>{if(e.key==="Enter") list.firstChild?.click();if(e.key==="Escape") closePalette();};fill();host.append(palette);search.focus();

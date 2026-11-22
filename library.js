@@ -11,6 +11,24 @@
   const list=document.getElementById("nodeList"),query=document.getElementById("nodeQuery"),graph=document.getElementById("graph");
   const mime="application/x-cubetex-node",folded=new Set();
   const normalize=s=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+  // Filter swatches use the same shared inputs so the change is visible across the library.
+  const swatches=new Map();
+  function nodeSwatch(type){
+    if(swatches.has(type))return swatches.get(type).cloneNode(true);
+    const spec=CubeEngine.types[type],sample=document.createElement("canvas");
+    sample.width=96;sample.height=48;
+    const make=(kind,id,params={})=>({id,type:kind,x:0,y:0,params:{...CubeEngine.defaults(kind),...params}});
+    const nodes=[make("bricks","bricks",{columns:4,rows:6}),make("colorize","color"),make("waves","wave",{scale:3}),make("gradient","ramp"),make(type,"result")];
+    const links=[{from:"bricks",to:"color",input:0}];
+    const sources=["color","wave","ramp","bricks"];
+    for(let i=0;i<spec.inputs;i++)links.push({from:sources[i],to:"result",input:i});
+    const graph={nodes,links};
+    CubeEngine.render(sample,graph,{nodeId:"result"});
+    const image=document.createElement("img");
+    image.src=sample.toDataURL("image/png");image.alt="";image.draggable=false;image.className="nodeSwatch";
+    swatches.set(type,image);return image.cloneNode(true);
+  }
+  window.CubeNodeSwatch=nodeSwatch;
   function draw(){
     list.replaceChildren();
     const term=normalize(query.value.trim());
@@ -23,7 +41,7 @@
       count.textContent=matches.length;summary.append(name,count);section.append(summary);
       for(const key of matches){
         const button=document.createElement("button");
-        button.type="button";button.draggable=true;button.className="libItem";button.textContent=CubeEngine.types[key].name;
+        button.type="button";button.draggable=true;button.className="libItem";button.append(nodeSwatch(key),document.createTextNode(CubeEngine.types[key].name));
         button.title=key==="output"?"Adicionar ou selecionar a saída PBR":"Clique para adicionar ou arraste ao ponto desejado";
         button.onclick=()=>CubeGraph.add(key);
         button.ondragstart=e=>{e.dataTransfer.setData(mime,key);e.dataTransfer.effectAllowed="copy";graph.classList.add("libTarget");};
