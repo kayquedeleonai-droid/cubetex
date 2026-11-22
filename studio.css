@@ -2,3 +2,12 @@
 .sample{margin:22px 16px;padding-top:17px;border-top:1px solid var(--edge)}.sample canvas{display:block;margin-top:12px;width:100%;height:88px;object-fit:cover;border-radius:4px;border:1px solid var(--edge)}@media(max-width:500px){header{gap:4px}.brand{gap:4px}.brand svg{width:19px}header button{font-size:10px;padding:7px 5px}}
 .actions{display:flex;gap:4px}.actions button:disabled{opacity:.38;cursor:default}
 #inspector{padding:18px 16px 0}.cg-inspect-head{padding-bottom:14px;border-bottom:1px solid var(--edge)}
+.layout{grid-template-columns:clamp(178px,16vw,235px) minmax(0,1fr) clamp(218px,20vw,310px)}
+#library{display:flex;flex-direction:column;min-height:0;height:max(583px,calc(100dvh - 204px))}
+.libTools{padding:12px;border-bottom:1px solid var(--edge)}.libTools input{width:100%;min-width:0;background:#10161a;border:1px solid #39444c;border-radius:5px;padding:8px;color:inherit;font-size:13px}.libTools small{display:block;margin-top:8px;color:var(--soft);font-size:11px}
+#nodeList{overflow:auto;padding:5px 8px 12px;scrollbar-width:thin;font-size:13px;color:#afbac0}
+#nodeList summary{cursor:pointer;padding:9px 3px 5px;color:#d9e1e7;font-weight:600}#nodeList summary span{float:right;font:11px Consolas;color:#8e9aa3}
+.libItem{width:100%;display:flex;align-items:center;gap:8px;border:1px solid transparent;background:transparent;font-weight:400;text-align:left;padding:5px 7px;cursor:grab}.libItem:before{content:"";width:8px;height:8px;border:1px solid var(--tag);border-radius:2px;background:color-mix(in srgb,var(--tag) 18%,transparent)}.libItem:hover{background:#293138;border-color:#39444b}.libTarget{outline:2px dashed var(--active)!important;outline-offset:-4px}
+.stage canvas.flat{width:100%;height:90%;max-width:90%;object-fit:contain;cursor:default}
+@media(max-width:950px){.layout{grid-template-columns:164px minmax(0,1fr)}.layout>aside{grid-column:2}.maps{width:102px}.project-meta{flex-wrap:wrap}}
+@media(max-width:650px){.layout{grid-template-columns:minmax(0,1fr)}.layout>aside{grid-column:1}#library{height:200px}.workspace{height:680px}#library .libTools{display:flex;align-items:center;gap:10px;padding:5px 10px}.libTools input{width:50%}.project-meta select{padding:6px 4px}.project-meta{gap:3px}#nodeList{display:flex;gap:12px}#nodeList details{min-width:150px}#library .bar{min-height:32px}}

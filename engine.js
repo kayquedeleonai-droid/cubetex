@@ -22,6 +22,16 @@
     warp:{name:"Distorção",inputs:2,params:[number("strength","Intensidade",0,0.5,0.001,0.045),angle]},
     transform:{name:"Transformar",inputs:1,params:[number("repeat","Repetições",1,16,1,1),number("offsetX","Offset X",-1,1,0.001,0),number("offsetY","Offset Y",-1,1,0.001,0)]},
     colorize:{name:"Gradiente de cor",inputs:1,params:[color("low","Sombras","#543827"),color("mid","Tons médios","#a77a50"),color("high","Pátina","#77b4a1"),number("threshold","Transição",0.1,0.9,0.005,0.455),number("contrast","Contraste",0.2,4,0.05,1.65)]},
+    masked:{name:"Mescla por máscara",inputs:3,params:[number("opacity","Opacidade",0,1,.01,1)]},
+    threshold:{name:"Limiar",inputs:1,params:[number("cut","Corte",0,1,.005,.5),number("soft","Suavidade",0,1,.005,.08)]},
+    quantize:{name:"Posterizar",inputs:1,params:[number("steps","Faixas",2,64,1,6)]},
+    gray:{name:"Escala de cinza",inputs:1,params:[]},
+    channel:{name:"Extrair canal",inputs:1,params:[select("channel","Canal",["R","G","B"],"R")]},
+    pack:{name:"Combinar RGB",inputs:3,params:[]},
+    sharpen:{name:"Nitidez",inputs:1,params:[number("strength","Força",0,5,.05,1)]},
+    edge:{name:"Detectar bordas",inputs:1,params:[number("strength","Ganho",.1,12,.1,3)]},
+    cavity:{name:"Cavidades",inputs:1,params:[number("radius","Raio",1,32,1,6),number("strength","Contraste",.1,10,.1,3)]},
+    mirror:{name:"Espelhar",inputs:1,params:[select("axis","Eixo",["X","Y","XY"],"X")]},
     output:{name:"Saída PBR",inputs:4,params:[number("relief","Relevo",0,8,0.05,2.65),number("roughness","Rugosidade",0,1,0.01,0.49),number("metallic","Metálico",0,1,0.01,0.76)]}
   };
   const defaults = type => Object.fromEntries(types[type].params.map(p=>[p.key,p.default]));
@@ -162,7 +172,43 @@
           out=new Uint8ClampedArray(size*size*4);
           if(!spec.inputs)source(node.type,p,size,out);
           else if(node.type==="blur")blur(a,out,size,p.radius);
-          else if(node.type==="colorize"){
+          else if(node.type==="masked" || node.type==="pack"){
+            const third=ins[2].data;
+            for(let i=0;i<out.length;i+=4){
+              if(node.type==="masked"){
+                const weight=p.opacity*third[i+3]/255;
+                for(let c=0;c<4;c++)out[i+c]=lerp(a[i+c],b[i+c],weight);
+              }else{
+                out[i]=a[i+3];out[i+1]=b[i+3];out[i+2]=third[i+3];
+                out[i+3]=.2126*out[i]+.7152*out[i+1]+.0722*out[i+2];
+              }
+            }
+          }else if(["threshold","gray","channel","quantize"].includes(node.type)){
+            const channel=["R","G","B"].indexOf(p.channel);
+            for(let i=0;i<out.length;i+=4){
+              if(node.type==="quantize"){
+                for(let c=0;c<4;c++)out[i+c]=255*Math.round(a[i+c]*(p.steps-1)/255)/(p.steps-1);
+                continue;
+              }
+              let value=.2126*a[i]+.7152*a[i+1]+.0722*a[i+2];
+              if(node.type==="channel")value=a[i+channel];
+              if(node.type==="threshold")value=255*(p.soft?smooth((a[i+3]/255-p.cut)/p.soft+.5):Number(a[i+3]/255>=p.cut));
+              out[i]=out[i+1]=out[i+2]=out[i+3]=value;
+            }
+          }else if(["edge","cavity","sharpen"].includes(node.type)){
+            const radius=Math.max(1,Math.round((p.radius||1)*size/256));
+            for(let y=0,i=0;y<size;y++)for(let x=0;x<size;x++,i+=4){
+              const left=4*(y*size+mod(x-radius,size)),right=4*(y*size+mod(x+radius,size));
+              const top=4*(mod(y-radius,size)*size+x),bottom=4*(mod(y+radius,size)*size+x);
+              if(node.type==="sharpen"){
+                for(let c=0;c<4;c++)out[i+c]=a[i+c]+p.strength*(a[i+c]-(a[left+c]+a[right+c]+a[top+c]+a[bottom+c])/4);
+              }else{
+                const v=node.type==="edge"?Math.hypot(a[right+3]-a[left+3],a[top+3]-a[bottom+3])/2:
+                  Math.max(0,(a[left+3]+a[right+3]+a[top+3]+a[bottom+3])/4-a[i+3]);
+                out[i]=out[i+1]=out[i+2]=out[i+3]=v*p.strength;
+              }
+            }
+          }else if(node.type==="colorize"){
             const low=hex(p.low),mid=hex(p.mid),high=hex(p.high);
             const lut=new Uint8ClampedArray(1024);
             for(let j=0;j<256;j++){
@@ -187,7 +233,8 @@
             const aRad=(p.angle||0)*Math.PI/180;
             for(let y=0,i=0;y<size;y++)for(let x=0;x<size;x++,i+=4){
               let sx,sy;
-              if(node.type==="warp"){const d=(b[i+3]/255-.5)*p.strength*size;sx=x+d*Math.cos(aRad);sy=y+d*Math.sin(aRad);}
+              if(node.type==="mirror"){sx=p.axis.includes("X")?size-1-x:x;sy=p.axis.includes("Y")?size-1-y:y;}
+              else if(node.type==="warp"){const d=(b[i+3]/255-.5)*p.strength*size;sx=x+d*Math.cos(aRad);sy=y+d*Math.sin(aRad);}
               else {sx=x*p.repeat+p.offsetX*size;sy=y*p.repeat+p.offsetY*size;}
               const ix=Math.floor(sx),iy=Math.floor(sy),fx=fract(sx),fy=fract(sy);
               const k=(mod(iy,size)*size+mod(ix,size))*4,j=(mod(iy,size)*size+mod(ix+1,size))*4;
@@ -210,9 +257,40 @@
     return [Math.sin(a)*Math.cos(e),Math.sin(e),Math.cos(a)*Math.cos(e),o.intensity??1];
   }
   const target=(g,o)=>o.nodeId??g.nodes.find(n=>n.type==="output")?.id??g.nodes[g.nodes.length-1]?.id;
+  // Reconcile opposite borders in a compact smooth band. Interior samples stay intact.
+  function joinBorders(data,w,h){
+    function reconcile(start,step,length){
+      const band=Math.min(Math.floor(length/2),Math.max(2,Math.round(length*.025)));
+      for(let d=0;d<band;d++){
+        const left=start+d*step,right=start+(length-1-d)*step;
+        const weight=.5*(1-smooth(d/Math.max(1,band-1)));
+        for(let c=0;c<4;c++){
+          const delta=(data[right+c]-data[left+c])*weight;
+          const low=data[left+c],high=data[right+c];
+          data[left+c]=low+delta;data[right+c]=high-delta;
+        }
+      }
+    }
+    for(let y=0;y<h;y++)reconcile(y*w*4,4,w);
+    for(let x=0;x<w;x++)reconcile(x*4,w*4,h);
+  }
+  function joinedMaterial(graph,id,size){
+    const material=build(graph,id,size),copies=new Map();
+    for(const key of ["data","height","rough","metal"]){
+      const original=material[key];
+      if(!original)continue;
+      if(!copies.has(original)){
+        const copy=original.slice();
+        joinBorders(copy,size,size);
+        copies.set(original,copy);
+      }
+      material[key]=copies.get(original);
+    }
+    return material;
+  }
   function render(canvas,graph,options={}) {
     const size=Math.max(canvas.width,canvas.height),w=canvas.width,h=canvas.height;if(!size)return;
-    const {data,height,rough,metal,p}=build(graph,target(graph,options),size);
+    const {data,height,rough,metal,p}=(options.nodeId?build:joinedMaterial)(graph,target(graph,options),size);
     const light=lighting(options),ctx=canvas.getContext("2d"),im=ctx.createImageData(w,h),out=im.data;
     const channel=String(options.map||"basecolor").toLowerCase(),relief=p.relief*size/720;
     for(let y=0,oi=0;y<h;y++)for(let x=0;x<w;x++,oi+=4){
@@ -230,11 +308,12 @@
       }
       out[oi]=r;out[oi+1]=g;out[oi+2]=b;out[oi+3]=255;
     }
+    if(!options.nodeId)joinBorders(out,w,h);
     ctx.putImageData(im,0,0);
   }
   function sphere(canvas,graph,options={}) {
     const w=canvas.width,h=canvas.height,sz=Math.min(640,Math.max(256,w));
-    const id=target(graph,options),{data,height,rough,metal,p}=build(graph,id,sz);
+    const id=target(graph,options),{data,height,rough,metal,p}=joinedMaterial(graph,id,sz);
     const ctx=canvas.getContext("2d"),im=ctx.createImageData(w,h),pix=im.data,light=lighting(options);
     const R=Math.min(w,h)*.467,rot=options.rotation||0;
     for(let y=0,i=0;y<h;y++)for(let x=0;x<w;x++,i+=4){

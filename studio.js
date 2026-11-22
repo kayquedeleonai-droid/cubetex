@@ -3,6 +3,13 @@ const el = id => document.getElementById(id);
 const maps = {basecolor:"Base Color",normal:"Normal",roughness:"Roughness",metallic:"Metallic",height:"Height",bake:"Luz (bake)"};
 const initialLight = {azimuth:315,elevation:48,intensity:1};
 let graph, light, rotation=0, flat=false, map="basecolor", renderTimer, persistTimer;
+const aspects=["1:1","2:1","1:2","4:1","1:4","4:3","3:4","16:9","9:16"];
+for(const value of aspects)el("aspect").add(new Option(value,value));
+function dimensions(longSide){
+  const [x,y]=(el("aspect").value||"1:1").split(":").map(Number);
+  return {width:Math.round(longSide*x/Math.max(x,y)),height:Math.round(longSide*y/Math.max(x,y))};
+}
+let tiled=false;
 const storageKey="cubetex.studio.project.v1";
 function validate(p){
   if(!p || p.version!==1 || !p.graph || !Array.isArray(p.graph.nodes)||!Array.isArray(p.graph.links)||p.graph.nodes.length>256||p.graph.links.length>1024)throw Error("Formato de projeto inválido");
@@ -26,7 +33,7 @@ function validate(p){
   function visit(id){if(done.has(id))return;if(visiting.has(id))throw Error("Conexão circular");visiting.add(id);for(const d of deps.get(id))visit(d);visiting.delete(id);done.add(id);}
   for(const id of ids)visit(id);
 }
-function state(){return {version:1,name:el("projectName").value||"Material",resolution:Number(el("resolution").value),light,graph};}
+function state(){return {version:1,name:el("projectName").value||"Material",resolution:Number(el("resolution").value),aspect:el("aspect").value,light,graph};}
 function status(s){el("status").textContent=s;}
 function persist(){
   clearTimeout(persistTimer);
@@ -54,11 +61,25 @@ document.addEventListener("keydown",e=>{
 function schedule(){clearTimeout(renderTimer);clearTimeout(persistTimer);renderTimer=setTimeout(renderAll,80);persistTimer=setTimeout(persist,400);}
 function renderView(){
   const canvas=el("sphere");
-  if(flat)CubeEngine.render(canvas,graph,{map,...light});
-  else CubeEngine.sphere(canvas,graph,{rotation,...light});
+  canvas.classList.toggle("flat",flat);
+  if(flat){
+    const {width,height}=dimensions(432);
+    canvas.width=width;canvas.height=height;
+    if(tiled){
+      const tile=document.createElement("canvas");
+      tile.width=Math.max(1,Math.floor(width/3));tile.height=Math.max(1,Math.floor(height/3));
+      CubeEngine.render(tile,graph,{map,...light});
+      canvas.width=tile.width*3;canvas.height=tile.height*3;
+      const ctx=canvas.getContext("2d");
+      for(let y=0;y<3;y++)for(let x=0;x<3;x++)ctx.drawImage(tile,x*tile.width,y*tile.height);
+    }else CubeEngine.render(canvas,graph,{map,...light});
+  }else{
+    canvas.width=canvas.height=400;
+    CubeEngine.sphere(canvas,graph,{rotation,...light});
+  }
   el("stamp").textContent=flat?maps[map].toUpperCase():"PERSPECTIVA";
-  el("stagehint").textContent=flat?"Textura 2D":"Arraste para girar";
-  el("view2").classList.toggle("active",flat);el("view3").classList.toggle("active",!flat);
+  el("stagehint").textContent=flat?(tiled?"Repetição 3 × 3":"Textura 2D"):"Arraste para girar";
+  el("tileView").classList.toggle("active",flat&&tiled);el("view2").classList.toggle("active",flat&&!tiled);el("view3").classList.toggle("active",!flat);
 }
 function renderAll(){
   renderView(); renderSample();
@@ -70,6 +91,7 @@ new MutationObserver(()=>{if(graph)renderSample();}).observe(el("inspector"),{ch
 function mount(p){
   validate(p);graph=p.graph;light={...initialLight,...p.light};el("projectName").value=p.name||"Material";
   el("resolution").value=["512","1024","2048","4096"].includes(String(p.resolution))?p.resolution:2048;
+  el("aspect").value=aspects.includes(p.aspect)?p.aspect:"1:1";
   currentGraph=JSON.stringify(graph);history=[];future=[];syncHistory();CubeGraph.mount(graph,graphChange);buildLights();renderAll();
 }
 function showMap(key){map=key;flat=true;for(const b of document.querySelectorAll(".map"))b.classList.toggle("selected",b.dataset.map===map);renderView();}
@@ -90,7 +112,9 @@ function buildLights(){
 }
 function switchTab(lighting){el("lighting").hidden=!lighting;el("inspector").hidden=lighting;el("sample").hidden=lighting;el("paramsTab").classList.toggle("chosen",!lighting);el("lightTab").classList.toggle("chosen",lighting);}
 el("paramsTab").onclick=()=>switchTab(false);el("lightTab").onclick=()=>switchTab(true);
-el("view2").onclick=()=>showMap(map);el("view3").onclick=()=>{flat=false;renderView();};
+el("aspect").onchange=()=>{flat=true;renderView();persist();};
+el("tileView").onclick=()=>{tiled=true;showMap(map);};
+el("view2").onclick=()=>{tiled=false;showMap(map);};el("view3").onclick=()=>{flat=false;renderView();};
 let drag=null;
 el("stage").onpointerdown=e=>{if(!flat){drag=e.clientX;e.currentTarget.setPointerCapture(e.pointerId);}};
 el("stage").onpointermove=e=>{if(drag===null)return;rotation+=(e.clientX-drag)*.012;drag=e.clientX;clearTimeout(renderTimer);renderTimer=setTimeout(renderView,16);};
@@ -109,18 +133,23 @@ el("open").onclick=()=>el("file").click();
 el("file").onchange=async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>3000000)throw Error("Arquivo muito grande");const p=JSON.parse(await f.text());validate(p);mount(p);persist();}catch(err){alert("Não foi possível abrir o projeto. "+err.message);}finally{e.target.value="";}};
 el("add").onclick=()=>CubeGraph.chooseNode();
 el("exportRes").innerHTML=el("resolution").innerHTML;
-function exportDialog(key){el("mapSelect").value=key;el("exportRes").value=el("resolution").value;el("modal").showModal();}
+function exportDimensions(){
+  const {width,height}=dimensions(Number(el("exportRes").value));
+  el("pixelSize").textContent=width+" × "+height+" px";
+}
+el("exportRes").onchange=exportDimensions;
+function exportDialog(key){el("mapSelect").value=key;el("exportRes").value=el("resolution").value;exportDimensions();el("modal").showModal();}
 el("export").onclick=()=>exportDialog(map);el("bake").onclick=()=>{showMap("bake");exportDialog("bake");};
 el("download").onclick=async()=>{
-  const key=el("mapSelect").value,size=Number(el("exportRes").value),name=filename()+"_"+key+"_"+size+".png";
+  const key=el("mapSelect").value,{width,height}=dimensions(Number(el("exportRes").value)),name=filename()+"_"+key+"_"+width+"x"+height+".png";
   el("modal").close();el("export").disabled=el("bake").disabled=true;status("Gerando PNG…");
   try{
     const options={...light,map:key};let blob;
     if(typeof Worker!=="undefined"&&typeof OffscreenCanvas!=="undefined"&&location.protocol!=="file:"){
       blob=await new Promise((resolve,reject)=>{const worker=new Worker("export-worker.js");
         worker.onmessage=e=>{worker.terminate();e.data.error?reject(Error(e.data.error)):resolve(e.data.blob);};
-        worker.onerror=e=>{worker.terminate();reject(Error(e.message));};worker.postMessage({size,options,graph});});
-    }else{await new Promise(r=>setTimeout(r,50));const c=document.createElement("canvas");c.width=c.height=size;CubeEngine.render(c,graph,options);blob=await new Promise(r=>c.toBlob(r,"image/png"));}
+        worker.onerror=e=>{worker.terminate();reject(Error(e.message));};worker.postMessage({width,height,options,graph});});
+    }else{await new Promise(r=>setTimeout(r,50));const c=document.createElement("canvas");c.width=width;c.height=height;CubeEngine.render(c,graph,options);blob=await new Promise(r=>c.toBlob(r,"image/png"));}
     if(!blob)throw Error("PNG indisponível");download(blob,name);status("PNG exportado");
   }catch(e){status("Falha na exportação");alert(e.message);}finally{el("export").disabled=el("bake").disabled=false;}
 };

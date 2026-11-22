@@ -53,7 +53,7 @@
     tx=p.x-(p.x-tx)*scale/prev; ty=p.y-(p.y-ty)*scale/prev; position();
   }
   function socketY(node,input) {
-    const count=spec(node).inputs; return input==null || count===1 ? 80 : count===4 ? 49+input*19 : 66+input*26;
+    const count=spec(node).inputs; return input==null || count===1 ? 80 : count===3 ? 55+input*25 : count===4 ? 49+input*19 : 66+input*26;
   }
   function wirePath(a,b,color,dash=false) {
     const t=Math.max(35,Math.abs(b.x-a.x)*.49);
@@ -75,7 +75,7 @@
     const output=input==null;
     const b=el("button","cg-port "+(output?"cg-out":"cg-in")); b.type="button";
     b.style.top=socketY(node,input)+"px";
-    const names={output:["Base Color","Height","Roughness","Metallic"],blend:["A","B"],warp:["Imagem","Mapa"]};
+    const names={masked:["Fundo","Camada","Máscara"],pack:["R","G","B"],output:["Base Color","Height","Roughness","Metallic"],blend:["A","B"],warp:["Imagem","Mapa"]};
     const label=output?"Saída · arraste para conectar":(names[node.type]?.[input] || "Entrada")+" · clique direito para desconectar";
     b.title=label; b.setAttribute("aria-label",label); b.dataset.node=node.id;
     if(!output) b.dataset.input=input;
@@ -237,6 +237,6 @@
     if(dest?.dataset.input!=null) connect(dest.dataset.node,Number(dest.dataset.input));
     else if(!dest) {pending=null;drawWires();}
   });
-  window.CubeGraph={mount,add,chooseNode,fit,zoom,remove,getSelected:()=>selected,select,render};
+  window.CubeGraph={point,mount,add,chooseNode,fit,zoom,remove,getSelected:()=>selected,select,render};
 })();
 
